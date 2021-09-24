@@ -1,0 +1,547 @@
+---
+title: "ISP Download Speed Performance and Regional Effects"
+author: "Maimuna Hassan"
+date: 31/08/21 - 24/09/21
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+---
+
+```{r Libraries, echo=FALSE, message=FALSE}
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+library(gghighlight)
+
+library(sf)
+library(raster)
+library(spData)
+library(spDataLarge)
+
+library(tmap) # for static and interactive maps
+library(tmaptools)
+library(leaflet) # for interactive maps
+library(gridExtra)
+```
+
+```{r Downlaoding data, echo=FALSE, message=FALSE, include=FALSE}
+broadband_performance <- readr::read_csv("data/broadband_performance.csv")
+
+region_map <- st_read("mapping_data/NUTS_Level_1_(January_2018)_Boundaries (2)/NUTS_Level_1_(January_2018)_Boundaries.shp")
+#changing region column to common name
+region_map<- rename(region_map, Region_Name = nuts118nm) 
+```
+
+```{r Cleaning data, echo=FALSE, message=FALSE, include=FALSE}
+broadband_performance <- rename(broadband_performance, Original_tech = Technology)
+broadband_performance <- rename(broadband_performance, temp_package_download = `PACKAGE (download by upload)`)
+
+summarised_broadband_performance <- broadband_performance %>% mutate(
+  Technology = case_when(
+    Original_tech == "SOGEA" ~ "FTTC",
+    TRUE ~ Original_tech
+  ),
+  package_download = case_when(
+    temp_package_download == 36 ~ 38,
+    TRUE ~ temp_package_download
+  )
+) %>% 
+  filter(Technology %in% c("FTTC"),
+         ISP %in% c("Vodafone", "EE", "Sky", "TalkTalk", "BT", "Plusnet")) %>% 
+  group_by(
+    ISP,
+    Technology,
+    package_download,
+    Region
+  ) %>% 
+  summarise(
+    ISP,
+    `Technology`,
+    package_download,
+    `Download - 24 (ave)`,
+    `Upload - 24 (ave)`,
+    `Region`
+  )
+
+summarised_broadband_performance %>% 
+  group_by(ISP) %>% 
+  summarise(count = n())
+
+summarised_broadband_performance<- rename(summarised_broadband_performance, average_download_speed = `Download - 24 (ave)`)
+summarised_broadband_performance<- rename(summarised_broadband_performance, average_upload_speed = `Upload - 24 (ave)`)
+```
+
+## Introduction
+
+### Overview
+SamKnows is a company with a unique measurement tool called a 'white box' that collects a range of performance test metric from volunteers. Some of these tests include download speed, upload speeds and latency measurements. This report investigates how download speeds vary with different ISPs. It particularly focuses on the discrepancy between ISP's promised 38 and 76 download speeds, and what speeds the white boxes actually measure. The telecommunication technology investigated is FTTC. Technology is kept as a control variable so that any differences found is due to ISPs only. The report will also explore regional differences of the mentioned plans under certain ISPs.
+
+The ISPs investigated are BT, Vodafone, TalkTalk, Sky, Plusnet and EE. Virgin Media was not used as it was the only technology that uses cable technology exclusively. Other ISPs do not have enough white boxes to have make good estimations of download speeds. 
+
+### Aims
+* Investigating which technologies have the worst download and upload speeds.
+* Investigating which regions technologies perform worst in.
+
+## Definitions
+-discrepancy
+--explain why 10%
+-proportion?
+COPY FROM OTHER REPORT
+
+## Calculations
+-discrepancy
+-proportion
+COPY FROM OTHER REPORT
+
+## ISPs with fastest download speeds
+NOTE SOMEWHERE THAT ISPs NOT REACHING TARGETS COULD ALSO BE A A FAULT OF THE TECHNOLOGY USED (FTTC), NEVERTHELESS DIRECT COMPARISONS BETWEEN ISPs CAN ONLY BE ATTRIBUTED TO THE ISPs THEMSELVES.
+
+```{r General ISP comparisons - 38 plan, echo=FALSE, message=FALSE}
+#38 plan
+
+top3_38 <- summarised_broadband_performance %>% 
+  group_by(ISP, package_download) %>% 
+  filter(package_download %in% c(38)) %>% 
+  summarise(`Average Download Speed (Mbps)` = mean(average_download_speed)) %>% 
+  arrange(desc(`Average Download Speed (Mbps)`)) %>% 
+  head(n = 3)
+
+summarised_broadband_performance %>% 
+  group_by(ISP, package_download) %>% 
+  filter(package_download %in% c(38)) %>% 
+  summarise(`Average Download Speed (Mbps)` = mean(average_download_speed)) %>% 
+  arrange(desc(`Average Download Speed (Mbps)`)) %>%
+  mutate(
+    top_ISP = ifelse(ISP %in% c("TalkTalk", "EE", "Vodafone"), TRUE, FALSE)
+  ) %>% 
+  ggplot(mapping = aes(x = ISP, y = `Average Download Speed (Mbps)`)) +
+  geom_col(aes(fill = top_ISP)) +
+  scale_fill_manual(values = c('grey', 'darkgreen')) +
+  ggtitle("Average Download Speed of ISPs under the 38 Mbps Plan")
+
+```
+
+A lot of variation, clearly shown which plans do much better than others.
+
+```{r General ISP comparisons - 76 plan, echo=FALSE, message=FALSE}
+#76 plan
+
+top3_76 <- summarised_broadband_performance %>% 
+  group_by(ISP, package_download) %>% 
+  filter(package_download %in% c(76)) %>% 
+  summarise(`Average Download Speed (Mbps)` = mean(average_download_speed)) %>% 
+  arrange(desc(`Average Download Speed (Mbps)`)) %>% 
+  head(n = 3)
+
+summarised_broadband_performance %>% 
+  group_by(ISP, package_download) %>% 
+  filter(package_download %in% c(76)) %>% 
+  summarise(`Average Download Speed (Mbps)` = mean(average_download_speed)) %>% 
+  arrange(desc(`Average Download Speed (Mbps)`)) %>%
+  mutate(
+    top_ISP = ifelse(ISP %in% c("BT", "TalkTalk", "Sky"), TRUE, FALSE)
+  ) %>% 
+  ggplot(mapping = aes(x = ISP, y = `Average Download Speed (Mbps)`)) +
+  geom_col(aes(fill = top_ISP)) +
+  scale_fill_manual(values = c('grey', 'darkgreen'))+
+  ggtitle("Average Download Speed of ISPs under the 76 Mbps Plan")
+```
+
+A lot more tight than the previous plan. Some ISP speeds are indistinguishable from each other by eye only.
+
+-why are isps ranked the way they are? lets look at the discrepancies between sold and actual speeds
+
+## Discrepancies in within ISPs
+```{r Discrepancy calculations, echo=FALSE, message=FALSE, include=FALSE}
+# Discrepancy -------------------------------------------------------------
+
+summarised_broadband_performance<- summarised_broadband_performance %>% mutate(
+  discrepancy_download = ((package_download - average_download_speed)/package_download) * 100,
+  significant = discrepancy_download >= 10
+)
+
+# Download Speed discrepancy ----------------------------------------------
+
+get_download_disrepancy <- function(a_tibble, package_plan) {
+   a_tibble %>%
+    filter(package_download == package_plan) %>%
+    ggplot(mapping = aes(x = discrepancy_download, fill = significant)) +
+    scale_fill_manual(values = c(`TRUE` = "red", `FALSE` = "grey")) +
+    geom_histogram(binwidth = 4) +
+    facet_wrap(~ ISP, nrow = 3)
+}
+```
+
+```{r Discrepancy histograms - 38 plan, echo=FALSE, message=FALSE}
+get_download_disrepancy(summarised_broadband_performance, 38)+
+  ggtitle("Number of volunteers with significant discrepancies between sold and measured download speed, split up by ISP.") +
+  labs(x = "Discrepancy (%)")
+```
+
+EE talktalk and vodafone have visibly low numbers of significant discrepancies compared to lower perfoming ISP like BT and Plusnet.
+
+```{r Discrepancy histograms - 76 plan, echo=FALSE, message=FALSE}
+get_download_disrepancy(summarised_broadband_performance, 76)+
+  ggtitle("Number of volunteers with significant discrepancies between sold and measured download speed, split up by ISP.")+
+  labs(x = "Discrepancy (%)")
+```
+
+It seems that with increase package speed, there is an increase in amount of significant discrepancy. A lot higher discrepancies, even for well performing ISPs. 
+will have to see if we can attribute these discrepancies to certain regions of the UK?
+
+-are there particular regions of the UK we an attribute these discrepancies to? see which regions might be under performing, and if there's a pattern.
+
+
+## Proportion of people with slow speeds in the UK.
+
+```{r Proportion calculations, echo=FALSE, message=FALSE, include=FALSE}
+# Population by region by ISP by plan -------------------------------------
+
+pop_by_region_plan <- summarised_broadband_performance %>% 
+  group_by(Region, package_download) %>% 
+  summarise(pop_by_region_plan = n())
+
+summarised_broadband_performance <- left_join(
+  summarised_broadband_performance, 
+  pop_by_region_plan, 
+  by = c("Region", "package_download")
+)
+
+# Smaller population with significant discrepancy -------------------------
+
+pop_discrepancy_by_region_ISP_plan <- summarised_broadband_performance %>%
+  group_by(Region, ISP, package_download, significant) %>% 
+  summarise(pop_discrepancy_by_region_ISP_plan = n())
+
+summarised_broadband_performance <- left_join(
+  summarised_broadband_performance,
+  pop_discrepancy_by_region_ISP_plan,
+  by = c("Region", "ISP", "package_download", "significant")
+)
+```
+
+```{r Mapping function, echo=FALSE, message=FALSE, include=FALSE}
+ISP_regional_performance <- function(a_tibble, ISP_name, package_plan) {
+  tibble1 <- a_tibble %>%
+    filter(ISP == ISP_name,
+           package_download == package_plan,
+           significant == TRUE
+    ) %>% 
+    dplyr::select(package_download,
+           Region,
+           discrepancy_download,
+           significant,
+           pop_by_region_plan,
+           pop_discrepancy_by_region_ISP_plan
+           )%>% 
+    mutate(
+      Region_Name = case_when(
+        Region == "North West" ~ "North West (England)",
+        Region == "North East" ~ "North East (England)",
+        Region == "South West" ~ "South West (England)",
+        Region == "South East" ~ "South East (England)",
+        Region == "East Midlands" ~ "East Midlands (England)",
+        Region == "West Midlands" ~ "West Midlands (England)",
+        Region == "East" ~ "East of England",
+        Region == "Yorkshire & Humberside" ~ "Yorkshire and The Humber",
+        TRUE ~ Region
+      )
+    ) %>% 
+    group_by(Region_Name) %>% 
+    mutate(`Average Discrepancy (%)` = mean(discrepancy_download)) %>% 
+    distinct(
+      Region_Name,
+      `Average Discrepancy (%)`
+    )
+  
+  tibble2 <- inner_join(region_map, tibble1)
+  
+  ##tmap version
+  
+  tm_shape(tibble2) +
+    tm_polygons("Average Discrepancy (%)", id = "Region_Name", palette = "Blues") +
+    tmap_mode("view")
+  
+  ##ggplot version
+  
+  # ggplot(tibble2) +
+  #   geom_sf(aes(fill = `Average Discrepancy (%)`), colour = "black", size = 0.01) +
+  #   scale_fill_gradient(low = "#56B1F7", high = "#132B43") +
+  #   theme(
+  #     panel.grid.major = element_blank(),
+  #     panel.grid.minor = element_blank(),
+  #     panel.background = element_blank()
+  #   )
+}
+```
+
+These are maps that look at performance in different regions of certain ISPs. See **HYPERLINK** <--- section to see how all plans act relative to each other.
+
+Talk about the increasing or decreasing discrepancies
+
+### TalkTalk
+
+best performer in both package plans
+
+```{r TalkTalk comparison, echo=FALSE, message=FALSE}
+m1 <- ISP_regional_performance(summarised_broadband_performance, "TalkTalk", 38)
+m2 <- ISP_regional_performance(summarised_broadband_performance, "TalkTalk", 76)
+
+tmap_arrange(m1, m2, ncol = 2)
+```
+
+Worst regions for 38 Mbps plan | Worst regions for 76 Mbps plan
+-------------------------------|-------------------------------
+Wales              | Yorkshire and The Humber
+East Midlands                  | Wales
+Scotland                  | North West
+
+### EE
+
+```{r EE comparison, echo=FALSE, message=FALSE}
+m3 <- ISP_regional_performance(summarised_broadband_performance, "EE", 38)
+m4 <- ISP_regional_performance(summarised_broadband_performance, "EE", 76)
+
+tmap_arrange(m3, m4, ncol = 2)
+```
+
+Worst regions for 38 Mbps plan | Worst regions for 76 Mbps plan
+-------------------------------|-------------------------------
+East Midlands               | North East
+East of England                  | Scotland
+South West                   | Wales
+
+### BT
+
+```{r BT comparison, echo=FALSE, message=FALSE}
+m5 <- ISP_regional_performance(summarised_broadband_performance, "BT", 38)
+m6 <- ISP_regional_performance(summarised_broadband_performance, "BT", 76)
+
+tmap_arrange(m5, m6, ncol = 2)
+```
+
+Worst regions for 38 Mbps plan | Worst regions for 76 Mbps plan
+-------------------------------|-------------------------------
+Northern Ireland               | West Midlands
+North West                 | South West
+East of England                  | South East
+
+### Plusnet
+
+```{r Plusnet comparison, echo=FALSE, message=FALSE}
+m7 <- ISP_regional_performance(summarised_broadband_performance, "Plusnet", 38)
+m8 <- ISP_regional_performance(summarised_broadband_performance, "Plusnet", 76)
+
+tmap_arrange(m7, m8, ncol = 2)
+```
+
+Worst regions for 38 Mbps plan | Worst regions for 76 Mbps plan
+-------------------------------|-------------------------------
+Wales             | South East
+West Midlands                  | Yorkshire and The Humber
+Northern Ireland             | East of England
+
+### Sky
+
+```{r Sky comparison, echo=FALSE, message=FALSE}
+m9 <- ISP_regional_performance(summarised_broadband_performance, "Sky", 38)
+m10 <- ISP_regional_performance(summarised_broadband_performance, "Sky", 76)
+
+tmap_arrange(m9, m10, ncol = 2)
+```
+
+Worst regions for 38 Mbps plan | Worst regions for 76 Mbps plan
+-------------------------------|-------------------------------
+West Midlands            | Yorkshire and The Humber
+North East                  | North East
+East of England             | East Midlands
+
+### Vodafone
+
+```{r Vodafone comparison, echo=FALSE, message=FALSE}
+m11 <- ISP_regional_performance(summarised_broadband_performance, "Vodafone", 38)
+m12 <- ISP_regional_performance(summarised_broadband_performance, "Vodafone", 76)
+
+tmap_arrange(m11, m12, ncol = 2)
+```
+
+Worst regions for 38 Mbps plan | Worst regions for 76 Mbps plan
+-------------------------------|-------------------------------
+Northern Ireland            | Scotland
+East of England                 | North West
+South West            | Yorkshire and The Humber
+
+
+## Worst performing regions
+
+```{r Worst performing region function, echo=FALSE, message=FALSE, include=FALSE}
+pop_discrepancy_by_region_plan <- summarised_broadband_performance %>% 
+  group_by(Region, package_download, significant) %>% 
+  summarise(pop_discrepancy_by_region_plan = n())
+  
+summarised_broadband_performance <- left_join(
+  summarised_broadband_performance,
+  pop_discrepancy_by_region_plan,
+  by = c("Region", "package_download", "significant")
+)
+
+worst_performing_region <- function(a_tibble, package_plan) {
+  tibble1 <- a_tibble %>%
+    filter(package_download == package_plan,
+           significant == TRUE) %>% 
+    dplyr::select(package_download,
+                  Region,
+                  discrepancy_download,
+                  significant,
+                  pop_by_region_plan,
+                  pop_discrepancy_by_region_plan
+    )%>% 
+    mutate(
+      Region_Name = case_when(
+        Region == "North West" ~ "North West (England)",
+        Region == "North East" ~ "North East (England)",
+        Region == "South West" ~ "South West (England)",
+        Region == "South East" ~ "South East (England)",
+        Region == "East Midlands" ~ "East Midlands (England)",
+        Region == "West Midlands" ~ "West Midlands (England)",
+        Region == "East" ~ "East of England",
+        Region == "Yorkshire & Humberside" ~ "Yorkshire and The Humber",
+        TRUE ~ Region
+      )
+    ) %>% 
+    group_by(Region_Name) %>% 
+    mutate(`Average Discrepancy (%)` = mean(discrepancy_download)) %>% 
+    distinct(
+      Region_Name,
+      `Average Discrepancy (%)`
+    )
+  
+  tibble2 <- inner_join(region_map, tibble1)
+  
+  ##tmap version
+  
+  tm_shape(tibble2) +
+    tm_polygons("Average Discrepancy (%)", id = "Region_Name", palette = "Blues") +
+    tmap_mode("view")
+  
+  ##ggplot version
+  
+  # ggplot(tibble2) +
+  #   geom_sf(aes(fill = `Average Discrepancy (%)`), colour = "black", size = 0.01) +
+  #   scale_fill_gradient(low = "#56B1F7", high = "#132B43") +
+  #   theme(
+  #     panel.grid.major = element_blank(),
+  #     panel.grid.minor = element_blank(),
+  #     panel.background = element_blank()
+  #   )
+}
+```
+
+    38 plan
+
+```{r, Plotting worst performing region - 38 plan, echo=FALSE, message=FALSE}
+worst_performing_region(summarised_broadband_performance, 38)
+```
+
+**Worst performing regions:**
+Northern Ireland
+East of England
+Wales
+
+    76 plan
+
+```{r, Plotting worst performing region - 76 plan, echo=FALSE, message=FALSE}
+worst_performing_region(summarised_broadband_performance, 76)
+```
+
+**Worst performing regions:**
+Yorkshire and The Humber
+Scotland
+South East
+
+
+## Contributors to worst performing regions
+
+```{r, Contributors to worst performing regions, echo=FALSE,message=FALSE}
+comparison_worst_performing_region <- function(a_tibble, ISP_name, package_plan) {
+  tibble1 <- a_tibble %>%
+    filter(package_download == package_plan,
+           ISP == ISP_name,
+           significant == TRUE) %>% 
+    dplyr::select(package_download,
+                  Region,
+                  discrepancy_download,
+                  significant,
+                  pop_by_region_plan,
+                  pop_discrepancy_by_region_plan
+    )%>% 
+    mutate(
+      Region_Name = case_when(
+        Region == "North West" ~ "North West (England)",
+        Region == "North East" ~ "North East (England)",
+        Region == "South West" ~ "South West (England)",
+        Region == "South East" ~ "South East (England)",
+        Region == "East Midlands" ~ "East Midlands (England)",
+        Region == "West Midlands" ~ "West Midlands (England)",
+        Region == "East" ~ "East of England",
+        Region == "Yorkshire & Humberside" ~ "Yorkshire and The Humber",
+        TRUE ~ Region
+      )
+    ) %>% 
+    group_by(Region_Name) %>% 
+    mutate(`Average Discrepancy (%)` = mean(discrepancy_download)) %>% 
+    distinct(
+      Region_Name,
+      `Average Discrepancy (%)`
+    )
+  
+  tibble2 <- inner_join(region_map, tibble1)
+  
+  ##tmap version
+  
+  # tm_shape(tibble2) +
+  #   tm_polygons("Average Discrepancy (%)", id = "Region_Name", palette = "Reds") +
+  #   tmap_mode("view")
+  
+  ##ggplot version
+  
+  ggplot(tibble2) +
+    geom_sf(aes(fill = `Average Discrepancy (%)`), colour = "black", size = 0.01) +
+    theme(
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.background = element_blank()
+    )
+}
+```
+
+    38 plan
+ 
+```{r, Plotting contributers - 38 plan, echo=FALSE, fig.height=7, fig.width=7, message=FALSE}
+map1 <- comparison_worst_performing_region(summarised_broadband_performance, "TalkTalk", 38)
+map2 <- comparison_worst_performing_region(summarised_broadband_performance, "EE", 38)
+map3 <- comparison_worst_performing_region(summarised_broadband_performance, "BT", 38)
+map4 <- comparison_worst_performing_region(summarised_broadband_performance, "Plusnet", 38)
+map5 <- comparison_worst_performing_region(summarised_broadband_performance, "Sky", 38)
+map6 <- comparison_worst_performing_region(summarised_broadband_performance, "Vodafone", 38)
+
+grid.arrange(map1, map2, map3, map4, map5, map6, nrow = 3)+
+    scale_fill_gradient(low = "#56B1F7", high = "#132B43", limits = c(0, 100))
+```
+
+
+    76 plan
+ 
+```{r, Plotting contributers - 76 plan, echo=FALSE, fig.height=7, fig.width=7, message=FALSE}
+map7 <- comparison_worst_performing_region(summarised_broadband_performance, "TalkTalk", 76)
+map8 <- comparison_worst_performing_region(summarised_broadband_performance, "EE", 76)
+map9 <- comparison_worst_performing_region(summarised_broadband_performance, "BT", 76)
+map10 <- comparison_worst_performing_region(summarised_broadband_performance, "Plusnet", 76)
+map11 <- comparison_worst_performing_region(summarised_broadband_performance, "Sky", 76)
+map12 <- comparison_worst_performing_region(summarised_broadband_performance, "Vodafone", 76)
+
+grid.arrange(map7, map8, map9, map10, map11, map12, nrow = 3)+
+    scale_fill_gradient(low = "#56B1F7", high = "#132B43", limits = c(0, 100))
+```
